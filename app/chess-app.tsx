@@ -206,7 +206,10 @@ export default function ChessApp() {
             <section className="board-column">
               <div className="board-topline"><span>{isPuzzle?<Puzzle size={15}/>:room?<Users size={15}/>:<Bot size={15}/>} {isPuzzle?puzzle.theme:room?'Arkadaş maçı':'Bilgisayara karşı'}<span className="separator">/</span>{isPuzzle?puzzle.level:'Standart satranç'}</span><button className="icon-btn" aria-label="Tahtayı çevir" title="Tahtayı çevir" onClick={()=>setFlipped(!flipped)}><RotateCw size={17}/></button></div>
               {player(topColor)}
-              <div className="board-frame">{board()}</div>
+              <div className="board-frame">
+                {board()}
+                {shownGame.isCheckmate()&&<span className="checkmate-badge" role="status" aria-label="Şah mat" title="Şah mat">#</span>}
+              </div>
               {player(bottomColor)}
               <div className="board-footer"><span className={game.isCheck()?'check-label':''}>{review!==null?'Geçmiş hamleyi inceliyorsun':isPuzzle?(puzzleDone?'Taktik tamamlandı!':'Beyaz oynar. En iyi hamleyi bul.'):result|| (room?.status==='waiting'?'Arkadaşının katılması bekleniyor…':thinking?'PoyBot düşünüyor…':game.isCheck()?'Şah! Şahını korumalısın.':game.turn()===myColor?'Sıra sende. Güzel bir hamle yap.':'Rakibin düşünüyor…')}</span><div><button className="icon-btn" title="Tahtayı çevir" aria-label="Tahtayı ters çevir" onClick={()=>setFlipped(!flipped)}><RotateCw size={16}/></button><button className="icon-btn" title="Tahta ayarları" aria-label="Tahta ayarları" onClick={()=>setModal('settings')}><Settings2 size={16}/></button></div></div>
             </section>
