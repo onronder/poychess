@@ -1,15 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Chess, type Square } from 'chess.js';
+import { type Square } from 'chess.js';
 import { Swords, Puzzle, BookOpen, History, Settings2, CircleHelp, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, RotateCcw, RotateCw, Flag, Handshake, Copy, Check, X, Volume2, VolumeX, Zap, Clock3, Users, Bot, Crown, Sparkles, Download, KeyRound, Lightbulb, ShieldCheck, Menu, MonitorSmartphone, Play, Trophy, Target } from 'lucide-react';
 import Piece from '@/components/piece';
-import { replay, gameResult, formatClock, timeControls, puzzles, pieceNames, type PlayedMove } from '@/lib/chess';
+import { Chess, replay, gameResult, formatClock, timeControls, puzzles, pieceNames, queenSettingError, type QueenJumps, type PlayedMove } from '@/lib/chess';
 
-type Room = {code:string;whiteName:string;blackName:string|null;moves:PlayedMove[];status:string;result:string|null;whiteMs:number;blackMs:number;increment:number;updatedAt:number;serverNow:number;version:number;drawOffer:string|null;role:'w'|'b';turn:'w'|'b';hintCount:number;hintAt:number;token?:string};
-type LocalGame = {id:string;moves:PlayedMove[];whiteMs:number;blackMs:number;stamp:number;active:boolean;result:string|null;color:'w'|'b';level:number;increment:number;hintCount:number;hintAt:number};
+type Room = {code:string;whiteName:string;blackName:string|null;moves:PlayedMove[];status:string;result:string|null;whiteMs:number;blackMs:number;increment:number;updatedAt:number;serverNow:number;version:number;drawOffer:string|null;takebackOffer:'w'|'b'|null;queenJumps:QueenJumps;role:'w'|'b';turn:'w'|'b';hintCount:number;hintAt:number;token?:string};
+type LocalGame = {id:string;moves:PlayedMove[];whiteMs:number;blackMs:number;stamp:number;active:boolean;result:string|null;color:'w'|'b';level:number;increment:number;hintCount:number;hintAt:number;queenJumps:QueenJumps};
 type GameRecord = {id:string;date:string;opponent:string;result:string;pgn:string};
-const fresh = ():LocalGame => ({id:Date.now().toString(),moves:[],whiteMs:600000,blackMs:600000,stamp:Date.now(),active:false,result:null,color:'w',level:2,increment:0,hintCount:0,hintAt:0});
+const fresh = ():LocalGame => ({id:Date.now().toString(),moves:[],whiteMs:600000,blackMs:600000,stamp:Date.now(),active:false,result:null,color:'w',level:2,increment:0,hintCount:0,hintAt:0,queenJumps:{w:0,b:0}});
 const lessons = [
   {title:'Taşlarını tanı',subtitle:'Satrancın alfabesi',icon:Crown,text:'Şah her yöne bir kare, vezir düz ve çapraz, kale düz, fil çapraz hareket eder. At L çizer ve taşların üzerinden atlayabilir. Piyon ileri gider, çapraz alır; ilk hamlesinde iki kare ilerleyebilir.',tip:'Taşların yaklaşık değeri: piyon 1, at ve fil 3, kale 5, vezir 9. Şahın değeri hesaplanmaz; onu korumalısın.'},
   {title:'Güçlü bir başlangıç',subtitle:'Açılışın üç altın kuralı',icon:Zap,text:'Önce merkezi kontrol et. e4 veya d4 ile başla, atlarını ve fillerini geliştir. Aynı taşı gereksiz yere tekrar oynama. Vezirini çok erken çıkarmak rakibe tempo kazandırabilir.',tip:'Şahını rok yaparak güvene al. Rok için şah ve kale hareket etmemiş olmalı; araları boş olmalı ve şah tehdit altındaki bir kareden geçmemelidir.'},
@@ -38,8 +38,9 @@ export default function ChessApp() {
   const hintWorker=useRef<Worker|null>(null); const localRef=useRef(local); localRef.current=local;
   const puzzle=puzzles[puzzleIndex]; const isPuzzle=section==='tactics';
   const moves=isPuzzle?puzzleMoves:room?room.moves:local.moves;
-  const game=replay(moves,isPuzzle?puzzle.fen:undefined);
-  const shownGame=review!==null&&!isPuzzle?replay(moves.slice(0,review)):game;
+  const queenJumps:QueenJumps=isPuzzle?{w:0,b:0}:room?.queenJumps||local.queenJumps||{w:0,b:0};
+  const game=replay(moves,isPuzzle?puzzle.fen:undefined,queenJumps);
+  const shownGame=review!==null&&!isPuzzle?replay(moves.slice(0,review),undefined,review<moves.length?moves[review]?.queenJumps:queenJumps):game;
   const result=isPuzzle?null:room?room.result:local.result;
   const myColor=isPuzzle?'w':room?room.role:local.color;
   const isFlipped=flipped;
@@ -53,7 +54,7 @@ export default function ChessApp() {
 
   useEffect(()=>{
     try {
-      const saved=localStorage.getItem('poychess-game'); if(saved){const data=JSON.parse(saved);replay(data.moves);setLocal(data);setFlipped(data.color==='b');}
+      const saved=localStorage.getItem('poychess-game'); if(saved){const data=JSON.parse(saved);replay(data.moves,undefined,data.queenJumps);setLocal({...fresh(),...data});setFlipped(data.color==='b');}
       setName(localStorage.getItem('poychess-name')||'Satrançsever');
       setRecords(JSON.parse(localStorage.getItem('poychess-history')||'[]'));
       setSolved(JSON.parse(localStorage.getItem('poychess-solved')||'[]'));
@@ -69,7 +70,7 @@ export default function ChessApp() {
   useEffect(()=>{if(ready)localStorage.setItem('poychess-game',JSON.stringify(local));},[local,ready]);
   useEffect(()=>{if(ready)localStorage.setItem('poychess-settings',JSON.stringify({sound,legal:showLegal,blue}));},[sound,showLegal,blue,ready]);
   useEffect(()=>{if(toast){const t=setTimeout(()=>setToast(''),3500);return()=>clearTimeout(t);}},[toast]);
-  useEffect(()=>{setSelected(null);setHint(null);setReview(null);},[currentFen,section]);
+  useEffect(()=>{setSelected(null);setHint(null);setReview(null);hintWorker.current?.terminate();setHintBusy(false);},[currentFen,section,queenJumps.w,queenJumps.b]);
   useEffect(()=>{if(!modal&&!hintOpen)return;const fn=(e:KeyboardEvent)=>{if(e.key==='Escape'){setModal(null);setHintOpen(false);}};window.addEventListener('keydown',fn);return()=>window.removeEventListener('keydown',fn);},[modal,hintOpen]);
   useEffect(()=>()=>{hintWorker.current?.terminate();},[]);
   useEffect(()=>{hintWorker.current?.terminate();setHintBusy(false);setHint(null);},[local.id,room?.code]);
@@ -86,18 +87,18 @@ export default function ChessApp() {
   },[room?.code]);
   useEffect(()=>{
     if(!ready||room||!local.active||local.result)return;
-    const g=replay(local.moves);const remaining=(g.turn()==='w'?local.whiteMs:local.blackMs)-(now-local.stamp);
+    const g=replay(local.moves,undefined,local.queenJumps);const remaining=(g.turn()==='w'?local.whiteMs:local.blackMs)-(now-local.stamp);
     if(remaining<=0)setLocal(s=>({...s,active:false,result:`${g.turn()==='w'?'Siyah':'Beyaz'} süre ile kazandı.`}));
   },[now,ready,room,local]);
   useEffect(()=>{
     if(!ready||room||!local.active||local.result)return;
-    const g=replay(local.moves);if(g.turn()===local.color)return;
+    const g=replay(local.moves,undefined,local.queenJumps);if(g.turn()===local.color)return;
     const worker=new Worker('/engine.js',{type:'module'});setThinking(true);
     worker.onmessage=e=>{if(e.data)applyLocal(e.data);setThinking(false);};
     worker.onerror=()=>{setThinking(false);setError('Satranç motoru yüklenemedi. Sayfayı yenileyebilirsin.');};
-    const timer=setTimeout(()=>worker.postMessage({pgn:g.pgn(),level:local.level}),350);
+    const timer=setTimeout(()=>worker.postMessage({moves:local.moves,queenJumps:local.queenJumps,level:local.level}),350);
     return()=>{clearTimeout(timer);worker.terminate();setThinking(false);};
-  },[ready,room?.code,local.moves,local.active,local.result,local.color,local.level]);
+  },[ready,room?.code,local.moves,local.active,local.result,local.color,local.level,local.queenJumps]);
   useEffect(()=>{
     if(!result||!ready)return;
     const id=room?room.code:local.id;
@@ -106,10 +107,10 @@ export default function ChessApp() {
 
   function ping(){if(!sound)return;try{const audio=new AudioContext();const osc=audio.createOscillator();const gain=audio.createGain();osc.connect(gain);gain.connect(audio.destination);osc.frequency.value=620;gain.gain.setValueAtTime(.05,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.1);osc.start();osc.stop(audio.currentTime+.1);osc.onended=()=>audio.close();}catch{}}
   function applyLocal(move:PlayedMove){
-    setLocal(state=>{if(state.result)return state;const g=replay(state.moves);const turn=g.turn();const stamp=Date.now();const elapsed=state.active?stamp-state.stamp:0;
+    setLocal(state=>{if(state.result)return state;const g=replay(state.moves,undefined,state.queenJumps);const turn=g.turn();const stamp=Date.now();const elapsed=state.active?stamp-state.stamp:0;
       if((turn==='w'?state.whiteMs:state.blackMs)<=elapsed)return {...state,result:`${turn==='w'?'Siyah':'Beyaz'} süre ile kazandı.`,active:false};
       try{g.move(move);}catch{return state;}
-      const end=gameResult(g);return {...state,moves:[...state.moves,move],whiteMs:turn==='w'?state.whiteMs-elapsed+state.increment:state.whiteMs,blackMs:turn==='b'?state.blackMs-elapsed+state.increment:state.blackMs,stamp,active:!end,result:end};
+      const end=gameResult(g);return {...state,moves:[...state.moves,{...move,queenJumps:state.queenJumps}],whiteMs:turn==='w'?state.whiteMs-elapsed+state.increment:state.whiteMs,blackMs:turn==='b'?state.blackMs-elapsed+state.increment:state.blackMs,stamp,active:!end,result:end};
     });ping();setSelected(null);
   }
   async function roomAction(action:string,extra:Record<string,unknown>={}){
@@ -148,7 +149,7 @@ export default function ChessApp() {
   function newGame(){
     setRoom(null);tokenRef.current='';sessionStorage.removeItem('poychess-room');
     const color=side==='random'?(Math.random()<.5?'w':'b'):side as 'w'|'b';const c=timeControls[control];
-    setLocal({...fresh(),whiteMs:c.minutes*60000,blackMs:c.minutes*60000,color,level,increment:c.increment*1000,active:true});
+    setLocal({...fresh(),whiteMs:c.minutes*60000,blackMs:c.minutes*60000,color,level,increment:c.increment*1000,active:true,queenJumps:{w:color==='w'?local.queenJumps[local.color]:0,b:color==='b'?local.queenJumps[local.color]:0}});
     setFlipped(color==='b');setReview(null);setHint(null);setSection('play');setTab('ai');setError('');setModal(null);
   }
   function startPuzzle(index:number){setPuzzleIndex(index%puzzles.length);setPuzzleMoves([]);setPuzzleMessage('');setSelected(null);setReview(null);setFlipped(false);setSection('tactics');setMenu(false);}
@@ -158,13 +159,33 @@ export default function ChessApp() {
   async function requestHint(){
     if(hintBusy||hintCount>=10||cooldown>0||result||isPuzzle||game.turn()!==myColor||room?.status==='waiting')return;
     setHintBusy(true);setHint(null);setError('');
-    let source=game;
-    if(room){const data=await roomAction('hint',{unlock:'7654321'});if(!data){setHintBusy(false);return;}source=replay(data.moves);}
+    let source=game,hintLimits=queenJumps;
+    if(room){const data=await roomAction('hint',{unlock:'7654321'});if(!data){setHintBusy(false);return;}hintLimits=data.queenJumps;source=replay(data.moves,undefined,hintLimits);}
     else setLocal(s=>({...s,hintCount:s.hintCount+1,hintAt:Date.now()}));
     const fen=source.fen();hintWorker.current?.terminate();const worker=new Worker('/engine.js',{type:'module'});hintWorker.current=worker;
-    worker.onmessage=e=>{if(e.data&&currentFenRef.current===fen){const g=new Chess(fen);const move=g.move(e.data);setHint({from:move.from,to:move.to,san:move.san,fen});}setHintBusy(false);worker.terminate();};
+    worker.onmessage=e=>{if(e.data&&currentFenRef.current===fen){const g=new Chess(fen);g.setQueenJumpLimits(hintLimits);const move=g.move(e.data);setHint({from:move.from,to:move.to,san:move.san,fen});}setHintBusy(false);worker.terminate();};
     worker.onerror=()=>{setError('İpucu motoru yüklenemedi.');setHintBusy(false);worker.terminate();};
-    worker.postMessage({pgn:source.pgn(),level:3});
+    worker.postMessage({fen,moves:[],queenJumps:hintLimits,level:3,hint:true});
+  }
+  async function changeQueenJumps(limit:number){
+    if(isPuzzle||result||busy||thinking||(!room&&game.turn()!==myColor))return;
+    if(room){await roomAction('queen-jumps',{limit,unlock:'7654321'});return;}
+    const next={...queenJumps,[myColor]:limit};
+    const invalid=queenSettingError(game,myColor,next);if(invalid){setError(invalid);return;}
+    const end=gameResult(replay(local.moves,undefined,next));
+    setLocal(s=>({...s,queenJumps:next,result:end,active:end?false:s.active}));setError('');
+    setToast(limit?`Vezirin en fazla ${limit} taşın üzerinden geçebilir.`:'Vezir normal kurallara döndü.');
+  }
+  function undoAgainstBot(){
+    if(thinking||!local.moves.length||local.result)return;
+    setLocal(s=>{
+      const g=replay(s.moves,undefined,s.queenJumps),stamp=Date.now(),elapsed=s.active?stamp-s.stamp:0;
+      const count=g.turn()===s.color?Math.min(2,s.moves.length):1;
+      const remaining=s.moves.slice(0,-count),removed=g.history({verbose:true}).slice(-count);
+      return {...s,moves:remaining,queenJumps:s.moves[remaining.length]?.queenJumps||{w:0,b:0},stamp,
+        whiteMs:Math.max(0,s.whiteMs-(g.turn()==='w'?elapsed:0)-removed.filter(m=>m.color==='w').length*s.increment),
+        blackMs:Math.max(0,s.blackMs-(g.turn()==='b'?elapsed:0)-removed.filter(m=>m.color==='b').length*s.increment)};
+    });setToast('PoyBot geri alma isteğini kabul etti. Harcanan süre geri verilmedi.');
   }
   function unlock(){if(unlockCode==='7654321'){setUnlocked(true);setUnlockError('');localStorage.setItem('poychess-hints','unlocked');}else setUnlockError('Kod doğru değil. Tekrar dene.');}
   function clocks(color:'w'|'b'){
@@ -204,7 +225,8 @@ export default function ChessApp() {
         {(section==='play'||isPuzzle)&&<>
           <div className="game-layout">
             <section className="board-column">
-              <div className="board-topline"><span>{isPuzzle?<Puzzle size={15}/>:room?<Users size={15}/>:<Bot size={15}/>} {isPuzzle?puzzle.theme:room?'Arkadaş maçı':'Bilgisayara karşı'}<span className="separator">/</span>{isPuzzle?puzzle.level:'Standart satranç'}</span><button className="icon-btn" aria-label="Tahtayı çevir" title="Tahtayı çevir" onClick={()=>setFlipped(!flipped)}><RotateCw size={17}/></button></div>
+              <div className="board-topline"><span>{isPuzzle?<Puzzle size={15}/>:room?<Users size={15}/>:<Bot size={15}/>} {isPuzzle?puzzle.theme:room?'Arkadaş maçı':'Bilgisayara karşı'}<span className="separator">/</span>{isPuzzle?puzzle.level:(queenJumps.w||queenJumps.b)?'Özel vezir kuralı':'Standart satranç'}</span><button className="icon-btn" aria-label="Tahtayı çevir" title="Tahtayı çevir" onClick={()=>setFlipped(!flipped)}><RotateCw size={17}/></button></div>
+              {!isPuzzle&&(queenJumps.w>0||queenJumps.b>0)&&<div className="variant-notice" role="status"><Crown size={17}/><span>Vezir atlama sınırı: beyaz <strong>{queenJumps.w}</strong>, siyah <strong>{queenJumps.b}</strong> taş.</span></div>}
               {player(topColor)}
               <div className="board-frame">
                 {board()}
@@ -221,7 +243,7 @@ export default function ChessApp() {
                   {tab==='ai'?<><div className="field-line"><label className="field-label" htmlFor="difficulty">ZORLUK SEVİYESİ</label><span>Seviye {level}</span></div><div className="level-buttons" id="difficulty">{['Başlangıç','Dengeli','Güçlü'].map((label,i)=><button key={label} className={level===i+1?'active':''} onClick={()=>setLevel(i+1)}>{label}</button>)}</div><div className="field-line"><label className="field-label">TAŞ RENGİN</label><div className="color-buttons"><button aria-label="Beyaz oyna" className={side==='w'?'active':''} onClick={()=>setSide('w')}><span className="color-token white-token"/></button><button aria-label="Rastgele renk" className={side==='random'?'active':''} onClick={()=>setSide('random')}><span className="color-token random-token"/></button><button aria-label="Siyah oyna" className={side==='b'?'active':''} onClick={()=>setSide('b')}><span className="color-token black-token"/></button></div></div><button className="primary-button" onClick={startGame}><Swords size={18}/>Oyuna başla</button><div className="panel-caption">Kendi ritminde oyna, her hamlede geliş.</div></>:<><label className="field-label" htmlFor="player-name">OYUNCU ADIN</label><input id="player-name" maxLength={24} value={name} onChange={e=>setName(e.target.value)} placeholder="Oyuncu adın"/><button className="primary-button" disabled={busy||room?.status==='active'} onClick={()=>roomAction('create')}><Users size={17}/>{busy?'Hazırlanıyor…':'Oda oluştur'}</button><div className="or-divider"><span/>veya bir oyuna katıl<span/></div><form className="join-form" onSubmit={e=>{e.preventDefault();void roomAction('join',{code:joinCode});}}><input aria-label="Oda kodu" maxLength={6} value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,''))} placeholder="6 haneli kod" required/><button disabled={busy||joinCode.length!==6||room?.status==='active'}>Katıl</button></form><div className="panel-caption"><MonitorSmartphone size={13}/>İki cihaz, aynı tahta.</div></>}
                 </>}
                 </div>
-                <div className="panel moves-panel"><div className="panel-title"><h3>Hamleler</h3><span>{Math.ceil(moves.length/2)} hamle</span></div><div className="move-table">{game.history().length?Array.from({length:Math.ceil(moves.length/2)},(_,i)=><div className="move-row" key={i}><span>{i+1}.</span>{[0,1].map(offset=><button key={offset} disabled={!game.history()[i*2+offset]} className={review===i*2+offset+1?'active':''} onClick={()=>setReview(i*2+offset+1)}>{game.history()[i*2+offset]||'—'}</button>)}</div>):<div className="empty-moves"><span>1.</span><span>İlk hamle hikâyeyi başlatır.</span></div>}</div><div className="replay-controls"><button className="icon-btn" aria-label="İlk konum" disabled={!moves.length} onClick={()=>setReview(0)}><ChevronsLeft size={17}/></button><button className="icon-btn" aria-label="Önceki hamle" disabled={!moves.length} onClick={()=>setReview(Math.max(0,(review??moves.length)-1))}><ChevronLeft size={17}/></button><button className="live-button" onClick={()=>setReview(null)}>{review===null?'CANLI':'OYUNA DÖN'}</button><button className="icon-btn" aria-label="Sonraki hamle" disabled={!moves.length} onClick={()=>setReview(Math.min(moves.length,(review??moves.length)+1))}><ChevronRight size={17}/></button><button className="icon-btn" aria-label="Güncel konum" onClick={()=>setReview(null)}><ChevronsRight size={17}/></button></div><div className="game-actions"><button disabled={!!result||(!room&&!local.moves.length)||room?.status==='waiting'} onClick={()=>setModal('resign')}><Flag size={15}/>Terk et</button>{room?<button disabled={!!result||room.status!=='active'||busy} onClick={()=>roomAction('draw')}><Handshake size={15}/>{room.drawOffer&&room.drawOffer!==room.role?'Kabul et':room.drawOffer===room.role?'Teklif gönderildi':'Beraberlik'}</button>:<button disabled={!!result||!local.moves.length||thinking} onClick={()=>{setLocal(s=>({...s,moves:s.moves.slice(0,Math.max(0,s.moves.length-2)),stamp:Date.now()}));setToast('Son hamle çifti geri alındı.');}}><RotateCcw size={15}/>Geri al</button>}<button aria-label="PGN indir" disabled={!moves.length} onClick={()=>download(game.pgn())}><Download size={15}/></button></div>{room?.drawOffer&&room.drawOffer!==room.role&&<div className="draw-notice">Rakibin beraberlik teklif etti. Hamle yaparak reddedebilir veya kabul edebilirsin.</div>}</div>
+                <div className="panel moves-panel"><div className="panel-title"><h3>Hamleler</h3><span>{Math.ceil(moves.length/2)} hamle</span></div><div className="move-table">{game.history().length?Array.from({length:Math.ceil(moves.length/2)},(_,i)=><div className="move-row" key={i}><span>{i+1}.</span>{[0,1].map(offset=><button key={offset} disabled={!game.history()[i*2+offset]} className={review===i*2+offset+1?'active':''} onClick={()=>setReview(i*2+offset+1)}>{game.history()[i*2+offset]||'—'}</button>)}</div>):<div className="empty-moves"><span>1.</span><span>İlk hamle hikâyeyi başlatır.</span></div>}</div><div className="replay-controls"><button className="icon-btn" aria-label="İlk konum" disabled={!moves.length} onClick={()=>setReview(0)}><ChevronsLeft size={17}/></button><button className="icon-btn" aria-label="Önceki hamle" disabled={!moves.length} onClick={()=>setReview(Math.max(0,(review??moves.length)-1))}><ChevronLeft size={17}/></button><button className="live-button" onClick={()=>setReview(null)}>{review===null?'CANLI':'OYUNA DÖN'}</button><button className="icon-btn" aria-label="Sonraki hamle" disabled={!moves.length} onClick={()=>setReview(Math.min(moves.length,(review??moves.length)+1))}><ChevronRight size={17}/></button><button className="icon-btn" aria-label="Güncel konum" onClick={()=>setReview(null)}><ChevronsRight size={17}/></button></div><div className="game-actions"><button disabled={!!result||(!room&&!local.moves.length)||room?.status==='waiting'} onClick={()=>setModal('resign')}><Flag size={15}/>Terk et</button>{room?<button disabled={!!result||room.status!=='active'||busy} onClick={()=>roomAction('draw')}><Handshake size={15}/>{room.drawOffer&&room.drawOffer!==room.role?'Kabul et':room.drawOffer===room.role?'Teklif gönderildi':'Beraberlik'}</button>:<button disabled={!!result||!local.moves.length||thinking} onClick={undoAgainstBot}><RotateCcw size={15}/>Geri al</button>}{room&&<button disabled={!!result||room.status!=='active'||!moves.length||busy||!!room.takebackOffer} onClick={()=>roomAction('takeback')}><RotateCcw size={15}/>Geri al</button>}<button aria-label="PGN indir" disabled={!moves.length} onClick={()=>download(game.pgn())}><Download size={15}/></button></div>{room?.takebackOffer&&<div className="takeback-notice" role="status"><div><RotateCcw size={18}/><strong>{room.takebackOffer===room.role?'Geri alma isteğin gönderildi.':'Rakibin son hamleyi geri almak istiyor.'}</strong></div><p>Son hamle, iki oyuncu da onayladığında geri alınır. Harcanan süre geri verilmez. Yeni bir hamle isteği iptal eder.</p><div className="takeback-buttons">{room.takebackOffer!==room.role&&<button className="primary-button" disabled={busy} onClick={()=>roomAction('takeback')}>Geri almayı kabul et</button>}<button className="secondary-button" disabled={busy} onClick={()=>roomAction('takeback-decline')}>{room.takebackOffer===room.role?'İsteği iptal et':'Reddet'}</button></div></div>}{room?.drawOffer&&room.drawOffer!==room.role&&<div className="draw-notice">Rakibin beraberlik teklif etti. Hamle yaparak reddedebilir veya kabul edebilirsin.</div>}</div>
               </>}
             </aside>
           </div>
@@ -233,7 +255,7 @@ export default function ChessApp() {
       </div>
     </main>
     <div className="hint-anchor"><button className={`hint-launcher ${unlocked?'unlocked':''}`} aria-label="İpucu panelini aç" title="İpucu paneli" onClick={()=>setHintOpen(!hintOpen)}>{hintOpen?<X size={19}/>:<KeyRound size={19}/>}<span>{unlocked?'İpucu':'Özel erişim'}</span>{unlocked&&<small>{10-hintCount}</small>}</button>
-      {hintOpen&&<div className="hint-popover"><div className="panel-title"><h3><Lightbulb size={18}/> Hamle asistanı</h3><button className="icon-btn" aria-label="İpucu panelini kapat" onClick={()=>setHintOpen(false)}><X size={17}/></button></div>{!unlocked?<form onSubmit={e=>{e.preventDefault();unlock();}}><p>İpucu panelini açmak için erişim kodunu gir.</p><input type="password" inputMode="numeric" aria-label="İpucu erişim kodu" value={unlockCode} onChange={e=>setUnlockCode(e.target.value)} placeholder="Erişim kodu" autoFocus/><button className="primary-button" type="submit"><KeyRound size={16}/>Kilidi aç</button>{unlockError&&<p className="error-text" role="alert">{unlockError}</p>}</form>:<><p>Motorun en iyi hamle önerisini tahtada gör.</p><div className="hint-stats"><span>Bu maç <strong>{hintCount} / 10</strong></span><span>Bekleme <strong>{cooldown>0?`${cooldown} sn`:'Hazır'}</strong></span></div>{hint&&hint.fen===currentFen&&<div className="hint-result"><Sparkles size={19}/><div><strong>{hint.san}</strong><span>{hint.from.toUpperCase()} → {hint.to.toUpperCase()}</span></div></div>}<button className="primary-button" disabled={hintBusy||busy||cooldown>0||hintCount>=10||!!result||isPuzzle||game.turn()!==myColor||room?.status==='waiting'} onClick={requestHint}><Lightbulb size={17}/>{hintBusy?'Konum inceleniyor…':hintCount>=10?'Maçlık hakların doldu':cooldown>0?`${cooldown} saniye bekle`:'En iyi hamleyi göster'}</button><small>{isPuzzle?'Taktiklerde antrenman panelindeki ipucunu kullan.':result?'Yeni maçta hakların yenilenir.':game.turn()!==myColor?'Sıra sana geldiğinde kullanabilirsin.':'Maç başına 10 ipucu · Her 20 saniyede bir'}</small></>}</div>}
+      {hintOpen&&<div className="hint-popover"><div className="panel-title"><h3><Lightbulb size={18}/> Hamle asistanı</h3><button className="icon-btn" aria-label="İpucu panelini kapat" onClick={()=>setHintOpen(false)}><X size={17}/></button></div>{!unlocked?<form onSubmit={e=>{e.preventDefault();unlock();}}><p>İpucu panelini açmak için erişim kodunu gir.</p><input type="password" inputMode="numeric" aria-label="İpucu erişim kodu" value={unlockCode} onChange={e=>setUnlockCode(e.target.value)} placeholder="Erişim kodu" autoFocus/><button className="primary-button" type="submit"><KeyRound size={16}/>Kilidi aç</button>{unlockError&&<p className="error-text" role="alert">{unlockError}</p>}</form>:<><p>Motorun en iyi hamle önerisini tahtada gör.</p><div className="hint-stats"><span>Bu maç <strong>{hintCount} / 10</strong></span><span>Bekleme <strong>{cooldown>0?`${cooldown} sn`:'Hazır'}</strong></span></div>{hint&&hint.fen===currentFen&&<div className="hint-result"><Sparkles size={19}/><div><strong>{hint.san}</strong><span>{hint.from.toUpperCase()} → {hint.to.toUpperCase()}</span></div></div>}<button className="primary-button" disabled={hintBusy||busy||cooldown>0||hintCount>=10||!!result||isPuzzle||game.turn()!==myColor||room?.status==='waiting'} onClick={requestHint}><Lightbulb size={17}/>{hintBusy?'Konum inceleniyor…':hintCount>=10?'Maçlık hakların doldu':cooldown>0?`${cooldown} saniye bekle`:'En iyi hamleyi göster'}</button><small>{isPuzzle?'Taktiklerde antrenman panelindeki ipucunu kullan.':result?'Yeni maçta hakların yenilenir.':game.turn()!==myColor?'Sıra sana geldiğinde kullanabilirsin.':'Maç başına 10 ipucu · Her 20 saniyede bir'}</small><div className="queen-settings"><label htmlFor="queen-jump-limit"><Crown size={18}/> Vezirle taş atlama</label><div className="queen-select"><select id="queen-jump-limit" value={queenJumps[myColor]} disabled={isPuzzle||!!result||busy||thinking||(room?.status!=='waiting'&&game.turn()!==myColor)} onChange={e=>void changeQueenJumps(Number(e.target.value))}>{Array.from({length:7},(_,n)=><option key={n} value={n}>{n===0?'Kapalı · normal satranç':n+' taş atlayabilsin'}</option>)}</select><ChevronRight size={16}/></div><p>Kendi vezirin düz veya çapraz giderken en fazla seçtiğin sayıda taşın üzerinden geçer. Atlanan taşlar yerinde kalır. Şah güvenliği korunur.</p><small>{isPuzzle?'Taktiklerde özel kurallar kapalıdır.':'Ayar maçta iki oyuncuya da gösterilir; sıra sendeyken değiştirebilirsin.'}</small></div></>}</div>}
     </div>
     {toast&&<div className="toast" role="status"><Check size={18}/>{toast}</div>}
     {promotion&&<div className="modal-backdrop"><div className="modal promotion-modal" role="dialog" aria-modal="true" aria-label="Piyon terfisi"><h2>Bir taş seç</h2><p>Piyonun son sıraya ulaştı.</p><div className="promotion-options">{['q','r','b','n'].map(p=><button key={p} aria-label={`${pieceNames[p]} olarak terfi et`} onClick={()=>{submitMove({...promotion,promotion:p});setPromotion(null);}}><Piece type={p} color={myColor}/></button>)}</div></div></div>}

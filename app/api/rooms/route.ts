@@ -1,19 +1,21 @@
 import { env } from 'cloudflare:workers';
-import { replay, gameResult, timeControls, type PlayedMove } from '@/lib/chess';
-type Room = { code:string; white_token:string; black_token:string|null; white_name:string; black_name:string|null; moves:string; status:string; result:string|null; white_ms:number; black_ms:number; increment:number; updated_at:number; expires_at:number; version:number; draw_offer:string|null; white_hint_count:number; black_hint_count:number; white_hint_at:number; black_hint_at:number };
+import { replay, gameResult, timeControls, queenSettingError, type PlayedMove } from '@/lib/chess';
+type Room = { code:string; white_token:string; black_token:string|null; white_name:string; black_name:string|null; moves:string; status:string; result:string|null; white_ms:number; black_ms:number; increment:number; updated_at:number; expires_at:number; version:number; draw_offer:string|null; white_hint_count:number; black_hint_count:number; white_hint_at:number; black_hint_at:number; takeback_offer:string|null;white_queen_jumps:number;black_queen_jumps:number };
+const limits=(room:Room)=>({w:room.white_queen_jumps,b:room.black_queen_jumps});
+const roomGame=(room:Room)=>replay(JSON.parse(room.moves),undefined,limits(room));
 const json = (data:unknown, status=200) => Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const hash = async (value:string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))).map(b=>b.toString(16).padStart(2,'0')).join('');
 const name = (value:unknown) => typeof value === 'string' ? value.trim().slice(0,24) || 'Satrançsever' : 'Satrançsever';
 function view(room:Room, role:string) {
-  const game = replay(JSON.parse(room.moves));
-  return {code:room.code,whiteName:room.white_name,blackName:room.black_name,moves:JSON.parse(room.moves),status:room.status,result:room.result,whiteMs:room.white_ms,blackMs:room.black_ms,increment:room.increment,updatedAt:room.updated_at,serverNow:Date.now(),version:room.version,drawOffer:room.draw_offer,role,turn:game.turn(),hintCount:role==='w'?room.white_hint_count:room.black_hint_count,hintAt:role==='w'?room.white_hint_at:room.black_hint_at};
+  const game = roomGame(room);
+  return {code:room.code,whiteName:room.white_name,blackName:room.black_name,moves:JSON.parse(room.moves),status:room.status,result:room.result,whiteMs:room.white_ms,blackMs:room.black_ms,increment:room.increment,updatedAt:room.updated_at,serverNow:Date.now(),version:room.version,drawOffer:room.draw_offer,takebackOffer:room.takeback_offer,queenJumps:limits(room),role,turn:game.turn(),hintCount:role==='w'?room.white_hint_count:room.black_hint_count,hintAt:role==='w'?room.white_hint_at:room.black_hint_at};
 }
 async function load(code:string):Promise<Room|null> {
   if (!env.DB) throw new Error('DB unavailable');
   const room = await env.DB.prepare('SELECT * FROM rooms WHERE code = ?').bind(code).first<Room>();
   if (!room || room.expires_at < Date.now()) return null;
   if (room.status === 'active') {
-    const game = replay(JSON.parse(room.moves));
+    const game = roomGame(room);
     const clock = game.turn() === 'w' ? room.white_ms : room.black_ms;
     if (Date.now() - room.updated_at >= clock) {
       const result = `${game.turn() === 'w' ? 'Siyah' : 'Beyaz'} süre ile kazandı.`;
@@ -74,6 +76,21 @@ export async function POST(request:Request) {
       return json({...view((await load(code))!,'b'),token});
     }
     if(!role) return json({error:'Bu oyun için yetkin yok.'},403);
+    if(body.action==='queen-jumps') {
+      if(body.unlock!=='7654321')return json({error:'Özel kural kodu hatalı.'},403);
+      if(!Number.isInteger(body.limit)||body.limit<0||body.limit>6)return json({error:'Atlama sınırı 0–6 arasında olmalı.'},400);
+      if(room.status==='finished')return json({error:'Oyun sona erdi.'},409);
+      if(body.version!==room.version)return json({error:'Oyun güncellendi. Tekrar dene.'},409);
+      const game=roomGame(room);
+      if(room.status==='active'&&game.turn()!==role)return json({error:'Özel kuralı sıra sendeyken değiştirebilirsin.'},409);
+      const nextLimits={...limits(room),[role]:body.limit};
+      const invalid=queenSettingError(game,role,nextLimits);if(invalid)return json({error:invalid},400);
+      const end=room.status==='active'?gameResult(replay(JSON.parse(room.moves),undefined,nextLimits)):null;
+      const query=role==='w'?'UPDATE rooms SET white_queen_jumps=?,takeback_offer=NULL,status=?,result=?,version=version+1 WHERE code=? AND version=?':'UPDATE rooms SET black_queen_jumps=?,takeback_offer=NULL,status=?,result=?,version=version+1 WHERE code=? AND version=?';
+      const updated=await env.DB.prepare(query).bind(body.limit,end?'finished':room.status,end,code,room.version).run();
+      if(!updated.meta.changes)return json({error:'Oyun güncellendi. Tekrar dene.'},409);
+      return json(view((await load(code))!,role));
+    }
     if(room.status!=='active') return json({error:room.status==='waiting'?'Arkadaşının katılması bekleniyor.':'Oyun sona erdi.'},409);
     if(body.action==='hint') {
       if(body.unlock!=='7654321') return json({error:'İpucu kodu hatalı.'},403);
@@ -81,26 +98,44 @@ export async function POST(request:Request) {
       const last=role==='w'?room.white_hint_at:room.black_hint_at;
       if(count>=10) return json({error:'Bu maçtaki 10 ipucunu kullandın.'},429);
       if(now-last<20000) return json({error:'İpuçları arasında 20 saniye beklemelisin.'},429);
-      if(replay(JSON.parse(room.moves)).turn()!==role) return json({error:'İpucunu sıra sendeyken kullanabilirsin.'},409);
+      if(roomGame(room).turn()!==role) return json({error:'İpucunu sıra sendeyken kullanabilirsin.'},409);
       const query=role==='w' ? 'UPDATE rooms SET white_hint_count=white_hint_count+1,white_hint_at=?,version=version+1 WHERE code=? AND version=?' : 'UPDATE rooms SET black_hint_count=black_hint_count+1,black_hint_at=?,version=version+1 WHERE code=? AND version=?';
       const changed=await env.DB.prepare(query).bind(now,code,room.version).run();
       if(!changed.meta.changes) return json({error:'Oyun güncellendi. Tekrar dene.'},409);
       return json(view((await load(code))!,role));
     }
     if(body.version!==room.version) return json({error:'Oyun güncellendi. Hamleni tekrar dene.'},409);
-    let moves:PlayedMove[]=JSON.parse(room.moves); const game=replay(moves);
+    let moves:PlayedMove[]=JSON.parse(room.moves); const game=roomGame(room);
     let result=room.result, status=room.status, draw=room.draw_offer;
+    let takeback=room.takeback_offer;
+    let queenJumps=limits(room);
     let white=room.white_ms,black=room.black_ms,updatedAt=room.updated_at;
     if(body.action==='move') {
       if(game.turn()!==role) return json({error:'Şu anda rakibinin sırası.'},409);
       try {
         const move=game.move({from:body.from,to:body.to,promotion:body.promotion||'q'});
-        moves=[...moves,{from:move.from,to:move.to,...(move.promotion?{promotion:move.promotion}:{})}];
+        moves=[...moves,{from:move.from,to:move.to,...(move.promotion?{promotion:move.promotion}:{}),queenJumps:limits(room)}];
       } catch {return json({error:'Bu hamle geçerli değil.'},400);}
       const elapsed=now-room.updated_at;
       if(role==='w') white=Math.max(0,white-elapsed)+room.increment; else black=Math.max(0,black-elapsed)+room.increment;
       updatedAt=now; result=gameResult(game); if(result) status='finished';
       if(draw && draw!==role) draw=null;
+      takeback=null;
+    } else if(body.action==='takeback') {
+      if(!moves.length)return json({error:'Geri alınacak hamle yok.'},409);
+      if(takeback===role)return json({error:'Rakibinin onayı bekleniyor.'},409);
+      if(takeback) {
+        // Approval from the other player removes exactly one ply. Spent time is not refunded.
+        const elapsed=Math.max(0,now-room.updated_at);
+        if(game.turn()==='w')white=Math.max(0,white-elapsed);else black=Math.max(0,black-elapsed);
+        const mover=game.turn()==='w'?'b':'w';
+        if(mover==='w')white=Math.max(0,white-room.increment);else black=Math.max(0,black-room.increment);
+        queenJumps=moves.at(-1)?.queenJumps||{w:0,b:0};
+        moves=moves.slice(0,-1);updatedAt=now;takeback=null;draw=null;
+      } else takeback=role;
+    } else if(body.action==='takeback-decline') {
+      if(!takeback)return json({error:'Bekleyen geri alma isteği yok.'},409);
+      takeback=null;
     } else if(body.action==='resign') {
       status='finished';result=`${role==='w'?'Siyah':'Beyaz'} kazandı. Rakibi terk etti.`;
     } else if(body.action==='draw') {
@@ -111,7 +146,7 @@ export async function POST(request:Request) {
       if(game.turn()==='w')white=Math.max(0,white-elapsed);else black=Math.max(0,black-elapsed);
       updatedAt=now;
     }
-    const updated=await env.DB.prepare('UPDATE rooms SET moves=?,white_ms=?,black_ms=?,updated_at=?,status=?,result=?,draw_offer=?,version=version+1 WHERE code=? AND version=?').bind(JSON.stringify(moves),white,black,updatedAt,status,result,draw,code,room.version).run();
+    const updated=await env.DB.prepare('UPDATE rooms SET moves=?,white_ms=?,black_ms=?,updated_at=?,status=?,result=?,draw_offer=?,takeback_offer=?,white_queen_jumps=?,black_queen_jumps=?,version=version+1 WHERE code=? AND version=?').bind(JSON.stringify(moves),white,black,updatedAt,status,result,draw,takeback,queenJumps.w,queenJumps.b,code,room.version).run();
     if(!updated.meta.changes) return json({error:'Oyun güncellendi. Lütfen tekrar dene.'},409);
     return json(view((await load(code))!,role));
   } catch {return json({error:'Sunucuya ulaşılamıyor. Lütfen tekrar dene.'},503);}

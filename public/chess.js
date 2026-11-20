@@ -1808,6 +1808,18 @@ class Chess {
     _castling = { w: 0, b: 0 };
     _hash = 0n;
     // tracks number of times a position has been seen for repetition checking
+    // PoyChess optional queen-jump variant. Zero preserves standard chess.
+    _queenJumps = { w: 0, b: 0 };
+    setQueenJumpLimits(limits = {}) {
+        const next = {
+            w: Number.isInteger(limits.w) ? Math.max(0, Math.min(6, limits.w)) : 0,
+            b: Number.isInteger(limits.b) ? Math.max(0, Math.min(6, limits.b)) : 0,
+        };
+        if (next.w !== this._queenJumps.w || next.b !== this._queenJumps.b) {
+            this._positionCount = new Map([[this._hash, 1]]);
+        }
+        this._queenJumps = next;
+    }
     _positionCount = new Map();
     constructor(fen = DEFAULT_POSITION, { skipValidation = false } = {}) {
         this.load(fen, { skipValidation });
@@ -2215,10 +2227,13 @@ class Chess {
                 const offset = RAYS[index];
                 let j = i + offset;
                 let blocked = false;
+                let jumps = piece.type === QUEEN ? this._queenJumps[color] : 0;
                 while (j !== square) {
                     if (this._board[j] != null) {
-                        blocked = true;
-                        break;
+                        if (jumps-- <= 0) {
+                            blocked = true;
+                            break;
+                        }
                     }
                     j += offset;
                 }
@@ -2415,6 +2430,7 @@ class Chess {
                 for (let j = 0, len = PIECE_OFFSETS[type].length; j < len; j++) {
                     const offset = PIECE_OFFSETS[type][j];
                     to = from;
+                    let jumps = type === QUEEN ? this._queenJumps[us] : 0;
                     while (true) {
                         to += offset;
                         if (to & 0x88)
@@ -2423,11 +2439,12 @@ class Chess {
                             addMove(moves, us, from, to, type);
                         }
                         else {
-                            // own color, stop loop
-                            if (this._board[to].color === us)
-                                break;
-                            addMove(moves, us, from, to, type, this._board[to].type, BITS.CAPTURE);
-                            break;
+                            // Jumped pieces stay put; only the landing piece is captured.
+                            if (this._board[to].color !== us) {
+                                if (this._board[to].type === KING) break;
+                                addMove(moves, us, from, to, type, this._board[to].type, BITS.CAPTURE);
+                            }
+                            if (jumps-- <= 0) break;
                         }
                         /* break, if knight or king */
                         if (type === KNIGHT || type === KING)

@@ -7,4 +7,6 @@ export const rooms = sqliteTable('rooms', {
   updatedAt: integer('updated_at').notNull(), expiresAt: integer('expires_at').notNull(), version: integer('version').notNull().default(0), drawOffer: text('draw_offer'),
   whiteHintCount: integer('white_hint_count').notNull().default(0), blackHintCount: integer('black_hint_count').notNull().default(0),
   whiteHintAt: integer('white_hint_at').notNull().default(0), blackHintAt: integer('black_hint_at').notNull().default(0),
+  takebackOffer: text('takeback_offer'),
+  whiteQueenJumps: integer('white_queen_jumps').notNull().default(0), blackQueenJumps: integer('black_queen_jumps').notNull().default(0),
 });

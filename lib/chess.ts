@@ -1,13 +1,30 @@
-import { Chess } from 'chess.js';
-export type PlayedMove = { from: string; to: string; promotion?: string };
+import { Chess } from '../public/chess.js';
+export { Chess };
+export type QueenJumps = {w:number;b:number};
+export type PlayedMove = { from: string; to: string; promotion?: string; queenJumps?:QueenJumps };
 export const timeControls = [
   { label: '3 + 2', name: 'Yıldırım', minutes: 3, increment: 2 },
   { label: '5 + 0', name: 'Yıldırım', minutes: 5, increment: 0 },
   { label: '10 + 0', name: 'Hızlı', minutes: 10, increment: 0 },
   { label: '15 + 10', name: 'Hızlı', minutes: 15, increment: 10 },
 ];
-export function replay(moves: PlayedMove[], fen?: string) {
-  const game = new Chess(fen); for (const move of moves) game.move(move); return game;
+export function replay(moves: PlayedMove[], fen?: string, queenJumps:QueenJumps={w:0,b:0}) {
+  const game = new Chess(fen);
+  for (const move of moves) {
+    game.setQueenJumpLimits(move.queenJumps);
+    game.move(move);
+    if(move.queenJumps&&(move.queenJumps.w||move.queenJumps.b)) game.setComment(`PoyChess queen jumps: white=${move.queenJumps.w}, black=${move.queenJumps.b}`);
+  }
+  game.setQueenJumpLimits(queenJumps);
+  if(queenJumps.w||queenJumps.b||moves.some(m=>m.queenJumps&&(m.queenJumps.w||m.queenJumps.b))) game.setHeader('Variant','PoyChess Queen Jump');
+  return game;
+}
+export function queenSettingError(game:Chess, color:'w'|'b', limits:QueenJumps):string|null {
+  const candidate=new Chess(game.fen());candidate.setQueenJumpLimits(limits);
+  const opponent=color==='w'?'b':'w';
+  const king=candidate.board().flat().find(p=>p?.type==='k'&&p.color===opponent);
+  if(king&&candidate.isAttacked(king.square,color)) return 'Bu ayar hamle yapmadan rakip şaha saldırı oluşturuyor. Daha düşük bir sınır seç.';
+  return null;
 }
 export function gameResult(game: Chess): string | null {
   if (game.isCheckmate()) return game.turn() === 'w' ? 'Siyah şah mat ile kazandı.' : 'Beyaz şah mat ile kazandı.';
