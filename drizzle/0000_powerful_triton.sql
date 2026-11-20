@@ -1,0 +1,21 @@
+CREATE TABLE `rooms` (
+	`code` text PRIMARY KEY NOT NULL,
+	`white_token` text NOT NULL,
+	`black_token` text,
+	`white_name` text NOT NULL,
+	`black_name` text,
+	`moves` text DEFAULT '[]' NOT NULL,
+	`status` text DEFAULT 'waiting' NOT NULL,
+	`result` text,
+	`white_ms` integer NOT NULL,
+	`black_ms` integer NOT NULL,
+	`increment` integer DEFAULT 0 NOT NULL,
+	`updated_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`version` integer DEFAULT 0 NOT NULL,
+	`draw_offer` text,
+	`white_hint_count` integer DEFAULT 0 NOT NULL,
+	`black_hint_count` integer DEFAULT 0 NOT NULL,
+	`white_hint_at` integer DEFAULT 0 NOT NULL,
+	`black_hint_at` integer DEFAULT 0 NOT NULL
+);
