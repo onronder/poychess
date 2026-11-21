@@ -7,7 +7,7 @@ Türkçe ve mobil uyumlu satranç platformu. React + Vinext / Cloudflare Workers
 - Bilgisayar rakibi: Web Worker içinde çalışan, üç seviyeli minimax / alfa-beta satranç motoru. Harici AI anahtarı gerekmez. Stockfish değildir; seviye isimleri resmî Elo puanı ifade etmez.
 - Arkadaş maçı: 6 karakterli oda kodu ile iki cihaz. Sunucu hamleleri, oyuncu sırasını, saatleri ve sonuçları doğrular. İstemci yaklaşık 1,5 saniyede bir eşitlenir.
 - Geri alma: arkadaş maçında istek gönderilir; rakip kabul edince son tek hamle geri alınır. Rakip reddedebilir, isteği gönderen iptal edebilir. Yeni hamle isteği iptal eder. Geçen süre geri verilmez, geri alınan hamlenin süre artışı çıkarılır. Bilgisayar maçında bot otomatik kabul eder ve son oyuncu/bot hamle çifti geri alınır.
-- Botun açılış repertuvarı piyon, fil ve at gelişimini çeşitlendirir. Değerlendirme aynı taşı açılışta tekrar oynama eğilimini azaltır. Süre dolduğunda yalnızca tamamen aranmış derinliğin sonuçları kullanılır.
+- Bot merkez kontrolünü, at/fil gelişimini, rok güvenliğini ve oyun sonundaki piyon ilerlemesini ayrı değerlendirir. Açılışta sürekli piyon sürmek veya aynı taşı tekrar oynatmak gelişimi geciktirir. Taş alma dizileri ve şah tehditleri arama sınırında da incelenir. Taş türü kotası yoktur; kazandıran piyon hamleleri hâlâ seçilebilir. Seviyeler en çok 2/3/4 yarım hamle derinlik ve 350/850/1600 ms arama bütçesi kullanır. Süre dolduğunda yalnızca tamamen aranmış derinliğin sonuçları kullanılır.
 - Rok, geçerken alma, dört taş seçeneğiyle terfi, mat, pat, tekrar ve 50 hamle beraberliği.
 - Dört açıklamalı taktik, temel satranç dersleri, hamle inceleme ve PGN indirme.
 - Yerel bilgisayar oyunu, taktik ilerlemesi ve oyun geçmişi bu tarayıcıda saklanır. Çevrim içi oyun odaları D1'de 24 saat geçerlidir. Oyuncu erişim anahtarı sekme oturumunda tutulur; sayfa yenilenince oyun devam eder.
@@ -37,9 +37,12 @@ Yerel adres: http://127.0.0.1:5173. Mobil cihazdan uzaktaki yayımlanmış URL k
 ```sh
 npx tsc --noEmit
 node --test tests/rules.test.mjs
+node --test tests/engine.test.mjs
 node --test tests/rooms.test.mjs
 ```
 
 Oda testleri çalışan 127.0.0.1:5173 sunucusunu ve yerel D1 veritabanını kullanır. Kota ve saat sınır durumlarını hızlı test etmek için yalnızca oluşturduğu test odalarının yerel kayıtlarını düzenler. Üretim sunucusunda çalışmaz.
 
 `public/chess.js`, chess.js 1.4.0 üzerine vezir atlama desteği eklenmiş yerel türevdir. Lisansı `public/chess-LICENSE` dosyasındadır. Üzerine node_modules kopyalamayın; sürüm yükseltirken `setQueenJumpLimits`, saldırı ışını ve hamle üretimi değişikliklerini koruyup testleri çalıştırın. İstemci, sunucu ve motor aynı türevi kullanır. Taş SVG'leri uygulamaya özeldir.
+
+Motor performans için bu yerel türevin `_moves`, `_makeMove`, `_undoMove` ve konum sayacı işlevlerini kullanır. Motor testleri normal ve süreyle kesilen aramalardan sonra tahta, rok, geçerken alma, terfi ve tekrar sayaçlarının korunduğunu doğrular. Bu arayüzler değişirse motor adaptörünü de güncelleyin.

@@ -6,6 +6,8 @@ import { Swords, Puzzle, BookOpen, History, Settings2, CircleHelp, ChevronRight,
 import Piece from '@/components/piece';
 import { Chess, replay, gameResult, formatClock, timeControls, puzzles, pieceNames, queenSettingError, type QueenJumps, type PlayedMove } from '@/lib/chess';
 
+const ENGINE_URL='/engine.js?v=20261121-balanced';
+
 type Room = {code:string;whiteName:string;blackName:string|null;moves:PlayedMove[];status:string;result:string|null;whiteMs:number;blackMs:number;increment:number;updatedAt:number;serverNow:number;version:number;drawOffer:string|null;takebackOffer:'w'|'b'|null;queenJumps:QueenJumps;role:'w'|'b';turn:'w'|'b';hintCount:number;hintAt:number;token?:string};
 type LocalGame = {id:string;moves:PlayedMove[];whiteMs:number;blackMs:number;stamp:number;active:boolean;result:string|null;color:'w'|'b';level:number;increment:number;hintCount:number;hintAt:number;queenJumps:QueenJumps};
 type GameRecord = {id:string;date:string;opponent:string;result:string;pgn:string};
@@ -93,7 +95,7 @@ export default function ChessApp() {
   useEffect(()=>{
     if(!ready||room||!local.active||local.result)return;
     const g=replay(local.moves,undefined,local.queenJumps);if(g.turn()===local.color)return;
-    const worker=new Worker('/engine.js',{type:'module'});setThinking(true);
+    const worker=new Worker(ENGINE_URL,{type:'module'});setThinking(true);
     worker.onmessage=e=>{if(e.data)applyLocal(e.data);setThinking(false);};
     worker.onerror=()=>{setThinking(false);setError('Satranç motoru yüklenemedi. Sayfayı yenileyebilirsin.');};
     const timer=setTimeout(()=>worker.postMessage({moves:local.moves,queenJumps:local.queenJumps,level:local.level}),350);
@@ -162,7 +164,7 @@ export default function ChessApp() {
     let source=game,hintLimits=queenJumps;
     if(room){const data=await roomAction('hint',{unlock:'7654321'});if(!data){setHintBusy(false);return;}hintLimits=data.queenJumps;source=replay(data.moves,undefined,hintLimits);}
     else setLocal(s=>({...s,hintCount:s.hintCount+1,hintAt:Date.now()}));
-    const fen=source.fen();hintWorker.current?.terminate();const worker=new Worker('/engine.js',{type:'module'});hintWorker.current=worker;
+    const fen=source.fen();hintWorker.current?.terminate();const worker=new Worker(ENGINE_URL,{type:'module'});hintWorker.current=worker;
     worker.onmessage=e=>{if(e.data&&currentFenRef.current===fen){const g=new Chess(fen);g.setQueenJumpLimits(hintLimits);const move=g.move(e.data);setHint({from:move.from,to:move.to,san:move.san,fen});}setHintBusy(false);worker.terminate();};
     worker.onerror=()=>{setError('İpucu motoru yüklenemedi.');setHintBusy(false);worker.terminate();};
     worker.postMessage({fen,moves:[],queenJumps:hintLimits,level:3,hint:true});
